@@ -24,8 +24,12 @@
     }
 
     function getEphemeralUser(hash) {
+		console.warn("4) Looking up emphemeral user with hash: ", hash);
         const users = JSON.parse(localStorage.getItem(ephemeralUserKey) || '{}');
+		console.warn("5) Loaded users from local storage: ", users);
         const user = users[hash];
+		console.warn("6) User by hash: ", user);
+		console.warn("7) Expiration vs current time: ", (user ? user.expire : 'NO EXPIRATION FOUND'), Date.now());
         if (user && user.expire > Date.now()) {
             return user;
         }
@@ -186,8 +190,13 @@
         ns.signout = function() {
             throw new Error("Signout Blocked");
         };
-        const hash = md5(params);
+		console.warn("1) Checking params to determine hash for ephemeral user");
+		var paramToUse = params.has("userToken") ? params.get("userToken") : params;
+		console.warn("2) Using param(s) for hash: ", paramToUse);
+        const hash = md5(paramToUse);
+		console.warn("3) Hashed param for ephemeral user lookup: ", hash);
         let user = getEphemeralUser(hash);
+		console.warn("8) Ephemeral login found user: ", user);
         if (!user) {
             console.warn("Creating new ephemeral user");
             user = await createEphemeralUser(params);

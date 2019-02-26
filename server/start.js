@@ -99,6 +99,10 @@ async function main() {
     app.set('views', root + '/html');
     app.set('view engine', 'tpl');
     app.set('trust proxy', true);
+    app.use(function(req, res, next) {
+        res.setHeader('Connection', 'close');
+        next();
+    });
 
     if (REDIRECT_INSECURE) {
         console.warn('Forcing HTTPS usage');
@@ -128,27 +132,35 @@ async function main() {
     atRouter.use('/@static', express.static(`${root}/static`, {
         strict: true,
         cacheControl: false,
-        setHeaders: res => res.setHeader('Cache-Control', cacheEnabled)
+        setHeaders: res => {
+            res.setHeader('Cache-Control', cacheEnabled);
+            res.setHeader('Connection', 'close');
+        }
     }));
     atRouter.get('/@env.js', (req, res) => {
         res.setHeader('Content-Type', 'application/javascript');
+        res.setHeader('Connection', 'close');
         const reqenv = Object.assign({CLIENT_IP: req.ip}, jsenv);
         res.send(`self.F=self.F||{};F.env=${JSON.stringify(reqenv)};`);
     });
     atRouter.get('/@version.json', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
+        res.setHeader('Connection', 'close');
         res.json({version: pkgVersion});
     });
     atRouter.get('/@worker-service.js', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
+        res.setHeader('Connection', 'close');
         res.sendFile(`static/js/worker/service${minify_ext}.js`, {root});
     });
     atRouter.get('/@worker-shared.js', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
+        res.setHeader('Connection', 'close');
         res.sendFile(`static/js/worker/shared${minify_ext}.js`, {root});
     });
     atRouter.get('/@install', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
+        res.setHeader('Connection', 'close');
         res.render('install', {subs});
     });
     atRouter.get('/@signin', (req, res) => {
@@ -157,13 +169,16 @@ async function main() {
     });
     atRouter.get('/@embed', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
+        res.setHeader('Connection', 'close');
         res.render('embed', {subs});
     });
     atRouter.get('/health', (req, res) => {
+        res.setHeader('Connection', 'close');
         res.send('ok');
     });
     atRouter.get(['/@', '/@/*'], (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
+        res.setHeader('Connection', 'close');
         res.render('main', {subs});
     });
     atRouter.all('/@*', (req, res) => res.status(404).send(`File Not Found: "${req.path}"\n`));
