@@ -28,6 +28,9 @@
             this.allowCalling = options.allowCalling;
             this.forceScreenSharing = options.forceScreenSharing;
             this.disableCommands = options.disableCommands;
+            this.disableMessageInfo = options.disableMessageInfo;
+            this.disableSenderInfo = options.disableSenderInfo;
+            this.disableRecipientsPrompt = options.disableRecipientsPrompt;
             this.onReadMarksChange = _.debounce(this._onReadMarksChange.bind(this), 200);
             F.ThreadView.prototype.initialize.apply(this, arguments);
         },
@@ -36,6 +39,8 @@
             await F.ThreadView.prototype.render.call(this);
             this.messagesView = new F.MessagesView({
                 collection: this.model.messages,
+                disableMessageInfo: this.disableMessageInfo,
+                disableSenderInfo: this.disableSenderInfo
             });
             this.$('.f-messages').append(this.messagesView.$el);
             this.messagesView.setScrollElement(this.$('.f-messages')[0]);
@@ -46,6 +51,7 @@
                 allowCalling: this.allowCalling,
                 forceScreenSharing: this.forceScreenSharing,
                 disableCommands: this.disableCommands,
+                disableRecipientsPrompt: this.disableRecipientsPrompt
             });
             this.listenTo(this.composeView, 'send', this.onSend);
             await Promise.all([
@@ -240,7 +246,6 @@
             const user = await F.atlas.getContact(id);
             return $(`<div class="f-read-mark f-avatar f-avatar-image" data-user-id="${id}" ` +
                           `title="${user.getName()} has read this far.">` +
-                        `<div class="ui loader small indeterminate"></div>` +
                         `<img src="${await user.getAvatarURL()}"/>` +
                      `</div>`);
         },
@@ -291,16 +296,16 @@
             if (!$mark.length) {
                 return; // For now just wait until a read marker adds it to avoid jumping around.
             }
-            $mark.find('.ui.loader').addClass('active');
+            $mark.addClass('radiate');
             const pendingCnt = $mark.data('pendingCnt') || 0;
             $mark.data('pendingCnt', pendingCnt + 1);
             setTimeout(() => {
                 const pendingCnt = $mark.data('pendingCnt');
                 $mark.data('pendingCnt', pendingCnt - 1);
                 if (pendingCnt === 1) {
-                    $mark.find('.ui.loader').removeClass('active');
+                    $mark.removeClass('radiate');
                 }
-            }, 3000);
+            }, 5000);
         },
 
         onAddMessage: function(message) {
