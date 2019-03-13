@@ -6,10 +6,16 @@
 
     let $loadingDimmer;
     let $loadingProgress;
-    const progressSteps = 5;
+    const progressSteps = 3;
     const sessionId = F.util.uuid4();
 
+    let _lastTick;
     function loadingTick(titleChange, amount) {
+        if (_lastTick) {
+            const lastTitle = $loadingDimmer.find('.loader.text').text();
+            console.warn(`"${lastTitle}" took: ${Date.now() - _lastTick}ms`);
+        }
+        _lastTick = Date.now();
         if (titleChange) {
             $loadingDimmer.find('.loader.text').html(titleChange);
         }
@@ -70,7 +76,6 @@
             await provisionView.show();
             await provisionView.finished;
         }
-        loadingTick('Initializing application...');
         await F.foundation.initApp();
     }
 
@@ -104,9 +109,12 @@
                 content: `Would you like to rejoin your call with:
                           ${mostRecent.getNormalizedTitle()}?`
             });
+            const callMgr = F.calling.getOrCreateManager(mostRecent.id, mostRecent);
             if (rejoin) {
-                const callMgr = F.calling.getOrCreateManager(mostRecent.id, mostRecent);
-                await callMgr.start({autoJoin: true});
+                // XXX Fix modal dimmer handling (e.g. make call view not a modal
+                relay.util.sleep(1).then(() => callMgr.start({autoJoin: true}));
+            } else {
+                await callMgr.sendLeave();
             }
         }
     }
@@ -170,7 +178,6 @@
         loadingTick('Checking authentication...');
         await F.atlas.login();
 
-        loadingTick('Loading resources...');
         await Promise.all([
             F.util.startIssueReporting(),
             F.util.startUsageReporting(),
@@ -186,7 +193,6 @@
         loadingTick();
 
         $loadingDimmer.removeClass('active');
-        console.info(`Messenger load time: ${Math.round(performance.now())}ms`);
 
         // Regression check of progress bar ticks.   The numbers need to managed manually.
         const pval = $loadingProgress.progress('get value');
@@ -197,7 +203,11 @@
         const haveRoute = F.router.start();
         if (!haveRoute && !F.util.isSmallScreen()) {
             await F.mainView.openMostRecentThread();
+        } else {
+            await F.mainView.openedThread;
         }
+
+        console.info(`Messenger load time: ${Math.round(performance.now())}ms`);
 
         const msgRecv = F.foundation.getMessageReceiver();
         await msgRecv.idle;  // Let things cool out..

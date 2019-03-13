@@ -98,9 +98,9 @@
         .f-join-toggle {
             position: absolute;
             margin: 0;
-            bottom: 3em;
+            bottom: 3.5em;
             left: calc(50% - 1.25em);
-            transform: scale(2);
+            transform: scale(1.5);
         }
 
         .f-call-presenter-view {
@@ -159,6 +159,30 @@
         }
     }
 
+    .f-soundlevel {
+        $width: 2.5em;
+        $height: 2.5em;
+
+        position: absolute;
+        opacity: 0.9;
+        width: $width;
+        height: $height;
+        bottom: 0;
+        background: #8787875e;
+        -webkit-mask-image: url(/@static/images/volume.svg);
+        mask-image: url(/@static/images/volume.svg);
+        -webkit-mask-size: $width $height;
+        mask-size: $width $height;
+
+        .f-indicator {
+            height: 100%;
+            width: 0;
+            background-image: linear-gradient(to right, #6de736, #20c220, #2faa2f, #768f14, #7d0202);
+            background-repeat: no-repeat;
+            background-size: $width $height;
+        }
+    }
+
     .f-members {
         flex: 1 1 100%;
         overflow: hidden;
@@ -188,6 +212,12 @@
         border: none;
         transition: max-height 300ms, padding 300ms;
         transition-delay: 0s;
+
+        .footer {
+            align-self: flex-end;
+            text-align: center;
+            padding-right: 3em; // Try to center overall
+        }
 
         .ui.button {
             font-size: 1em;
@@ -377,22 +407,25 @@
 
 
 .f-call-member-view {
-    background: #333;
-    border-radius: 0.28em;
-    box-shadow: 0 0 1px 0 #fff6;
+    background: #222;
+    border-radius: 0.20em;
     display: flex;
     flex-direction: column;
     flex: 0 1 100%;
     font-size: 0.8em;
-    margin: 0.25em;
+    margin: 0.22em;
     overflow: hidden;
     position: relative;
     min-width: 4em;
     cursor: pointer;
     transition: background 200ms;
 
+    .f-soundlevel {
+        font-size: 0.7em;
+    }
+
     &:hover {
-        background: #444;
+        background: #333;
     }
 
     .f-status-circle.icon {
@@ -403,10 +436,13 @@
         color: white;
     }
 
+    .f-soundlevel {
+        left: calc(50% - 1.25em);  // 1.25 = half current width of f-soundmeter
+    }
+
     .video-wrap {
         overflow: hidden;
         position: relative;
-        margin: 0.3em;
         flex: 1 1 100%;
         transition: filter 400ms;
     }

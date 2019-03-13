@@ -339,7 +339,7 @@
                 await Promise.all([
                     F.util.visible(),
                     F.util.online(),
-                    relay.util.sleep(10 + (30 * Math.random()))
+                    relay.util.sleep(15 + (30 * Math.random()))
                 ]);
                 for (const item of this.getItems()) {
                     if (!item.el || !item.el.isConnected) {
@@ -493,7 +493,7 @@
             }
             const update = {position, pinned: true};
             for (const model of this.collection.models) {
-                const viewIndex = this.$('.f-nav-item').index(this._views[model.id].$el);
+                const viewIndex = this.$('.f-nav-item').index(this.getItem(model).$el);
                 console.debug(model.get('position'), viewIndex);
             }
             thread.save(update);

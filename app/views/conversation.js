@@ -65,7 +65,6 @@
             this.listenTo(this.model, 'change:readMarks', this.onReadMarksChange);
             this.listenTo(this.model, 'pendingMessage', this.onPendingMessage);
             this.listenTo(this.model.messages, 'add', this.onAddMessage);
-            this.listenTo(this.model.messages, 'expired', this.onExpiredCollection);
             this.listenTo(this.model.messages, 'add remove', this.onReadMarksChange);
             const loaded = this.model.messages.length;
             const available = await this.model.messages.totalCount();
@@ -231,27 +230,26 @@
 
         onExpired: function(message) {
             var mine = this.model.messages.get(message.id);
-            // XXX Suspect logic here.  Why do we need to make sure it's not the
-            // same model as our collection's instance?
+            // This is odd, Message gets its own expired event but it might have been
+            // triggered on some other Message model (not sure why).  This ensures the
+            // expired event is fired on our Message model.
             if (mine && mine.cid !== message.cid) {
                 mine.trigger('expired', mine);
             }
         },
 
-        onExpiredCollection: function(message) {
-            this.model.messages.remove(message.id);
-        },
-
         _createReadMarkEl: async function(id) {
             const user = await F.atlas.getContact(id);
-            return $(`<div class="f-read-mark f-avatar f-avatar-image" data-user-id="${id}" ` +
-                          `title="${user.getName()} has read this far.">` +
-                        `<img src="${await user.getAvatarURL()}"/>` +
-                     `</div>`);
+            return user && $(`
+                <div class="f-read-mark f-avatar f-avatar-image" data-user-id="${id}"
+                     title="${user.getName()} has read this far.">
+                    <img src="${await user.getAvatarURL()}"/>
+                </div>
+            `);
         },
 
         _onReadMarksChange: async function() {
-            await F.queueAsync(`read-marks-${this.id}`, async () => {
+            await F.queueAsync(`read-marks-${this.cid}`, async () => {
                 const readMarks = this.model.get('readMarks') || {};
                 await Promise.all(Object.entries(readMarks).map(async ([id, sent]) => {
                     // Exact matches are not always possible, so search up till we find
@@ -274,6 +272,10 @@
                     if (!$mark.length) {
                         $mark = await this._createReadMarkEl(id);
                     } else if ($mark.data('target') === msgView) {
+                        return;
+                    }
+                    if (!$mark.length) {
+                        // Most likely this is an old removed user.
                         return;
                     }
                     $mark.data('target', msgView);

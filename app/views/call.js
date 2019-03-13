@@ -13,6 +13,15 @@
     const chromeExtUrl = `https://chrome.google.com/webstore/detail/${F.env.SCREENSHARE_CHROME_EXT_ID}`;
     const chromeWebStoreImage = F.util.versionedURL(F.urls.static + 'images/chromewebstore_v2.png');
 
+    const lowVolume = -40;  // dBV
+    const highVolume = -3;  // dBV
+
+    function volumeLoudness(dBV) {
+        // Return a loudness percentage for a dBV level.
+        const range = highVolume - lowVolume;
+        return (range - (highVolume - dBV)) / range;
+    }
+
     let _audioCtx;
     function getAudioContext() {
         // There are limits to how many of these we can use, so share..
@@ -145,6 +154,7 @@
             this.forceScreenSharing = options.forceScreenSharing;
             this.offeringPeers = new Map();
             this.memberViews = new Map();
+            this._incoming = new Set();
             this._managerEvents = {
                 peerjoin: this.onPeerJoin.bind(this),
                 peericecandidates: this.onPeerICECandidates.bind(this),
@@ -152,6 +162,9 @@
                 peeracceptoffer: this.onPeerAcceptOffer.bind(this),
                 peerleave: this.onPeerLeave.bind(this),
             };
+            for (const [event, listener] of Object.entries(this._managerEvents)) {
+                this.manager.addEventListener(event, listener);
+            }
             this._fullscreenEvents = {
                 mozfullscreenchange: this.onFullscreenChange.bind(this),
                 webkitfullscreenchange: this.onFullscreenChange.bind(this),
@@ -269,12 +282,14 @@
         },
 
         removeMemberView: function(view) {
-            const id = `${view.userId}.${view.device}`;
-            F.assert(view === this.memberViews.get(id));
-            this.memberViews.delete(id);
+            const addr = `${view.userId}.${view.device}`;
+            F.assert(view === this.memberViews.get(addr));
+            this.memberViews.delete(addr);
             if (view === this._presenting) {
                 this._presenting = null;
-                this.selectPresenter(this.getMostPresentableMemberView());
+                if (this.presenterView) {
+                    this.selectPresenter(this.getMostPresentableMemberView());
+                }
             }
             view.remove();
         },
@@ -284,6 +299,47 @@
             this.$('.f-call-status').html(value);
         },
 
+        addIncoming: function(addr) {
+            this._incoming.add(addr);
+            if (this._clearIncomingTimeout) {
+                clearTimeout(this._clearIncomingTimeout);
+            }
+            this._clearIncomingTimeout = setTimeout(() => this.clearIncoming(), 15 * 1000);
+            this._updateIncoming();
+        },
+
+        removeIncoming: function(addr) {
+            this._incoming.delete(addr);
+            if (!this._incoming.size && this._clearIncomingTimeout) {
+                clearTimeout(this._clearIncomingTimeout);
+                this._clearIncomingTimeout = null;
+            }
+            this._updateIncoming();
+        },
+
+        clearIncoming: function() {
+            this._incoming.clear();
+            if (this._clearIncomingTimeout) {
+                clearTimeout(this._clearIncomingTimeout);
+                this._clearIncomingTimeout = null;
+            }
+            this._updateIncoming();
+        },
+
+        _updateIncoming: async function() {
+            const $footer = this.$('.actions .footer');
+            if (!this._incoming.size) {
+                $footer.html('');
+            } else if (this._incoming.size === 1) {
+                const addr = Array.from(this._incoming)[0];
+                const user = await F.atlas.getContact(addr.split('.')[0]);
+                $footer.html(`Incoming call from ${user.getName()}...`);
+            } else {
+                $footer.html(`${this._incoming.size} incoming calls...`);
+            }
+            this.$('.f-join-toggle.button').toggleClass('bouncy decay margin', !!this._incoming.size);
+        },
+
         setJoined: function(joined) {
             joined = joined !== false;
             if (joined) {
@@ -291,6 +347,7 @@
             } else {
                 this._left = this._left || Date.now();
             }
+            this.clearIncoming();
             this.$el.toggleClass('joined', joined);
             this.$('.f-join-toggle.button').toggleClass('active', !joined);
         },
@@ -303,9 +360,6 @@
             }
             this._joining = true;
             try {
-                for (const [event, listener] of Object.entries(this._managerEvents)) {
-                    this.manager.addEventListener(event, listener);
-                }
                 await this.manager.sendJoin();
                 this.setJoined(true);
             } finally {
@@ -319,10 +373,8 @@
                 return;
             }
             this._leaving = true;
+            this.setJoined(false);
             try {
-                for (const [event, listener] of Object.entries(this._managerEvents)) {
-                    this.manager.removeEventListener(event, listener);
-                }
                 await this.manager.sendLeave();
                 for (const view of this.getMemberViews()) {
                     if (view.outgoing) {
@@ -330,33 +382,47 @@
                     }
                     this.removeMemberView(view);
                 }
-                this.setJoined(false);
             } finally {
                 this._leaving = false;
             }
         },
 
         remove: function() {
+            for (const [event, listener] of Object.entries(this._managerEvents)) {
+                this.manager.removeEventListener(event, listener);
+            }
+            for (const track of this.outStream.getTracks()) {
+                track.stop();
+            }
             if (this._soundCheckInterval) {
                 clearInterval(this._soundCheckInterval);
                 this._soundCheckInterval = null;
             }
-            this.leave();
-            this.outStream.getTracks().map(x => x.stop());
             for (const [event, listener] of Object.entries(this._fullscreenEvents)) {
                 document.removeEventListener(event, listener);
             }
             if (this._joined) {
-                if (!this._left) {
-                    this._left = Date.now();
-                }
-                const elapsed = moment.duration(this._left - this._joined);
-                this.model.createMessage({
-                    type: 'clientOnly',
-                    plain: `You were in a call for ${elapsed.humanize()}.`
+                this.leave().then(() => {
+                    const elapsed = moment.duration(this._left - this._joined);
+                    this.model.createMessage({
+                        type: 'clientOnly',
+                        plain: `You were in a call for ${elapsed.humanize()}.`
+                    });
+                    this._cleanup();
                 });
+            } else {
+                this._cleanup();
             }
             return F.ModalView.prototype.remove.call(this);
+        },
+
+        _cleanup: function() {
+            this.presenterView.remove();
+            this.presenterView = null;
+            for (const view of this.getMemberViews()) {
+                this.removeMemberView(view);
+            }
+            this.outView = null;
         },
 
         _getMediaDeviceVideoConstraints: async function() {
@@ -506,7 +572,7 @@
                 // 2 or more remote peers.  Return the loudest one.
                 let loudest = this._presenting !== this.outView ? this._presenting : null;
                 for (const view of memberViews) {
-                    if (!loudest || view.soundLevel - loudest.soundLevel >= 0.01) {
+                    if (!loudest || view.soundRMS - loudest.soundRMS >= 0.01) {
                         loudest = view;
                     }
                 }
@@ -595,22 +661,21 @@
         onPeerOffer: async function(ev) {
             F.assert(ev.data.callId === this.manager.callId);
             F.assert(!this.getMemberView(ev.sender, ev.device));
-            const id = `${ev.sender}.${ev.device}`;
-            console.info('Peer sent us a call-offer:', id);
-            if (this.getMemberView(ev.sender, ev.device)) {
-                console.error("XXX peer offer for existing peer, decide what to do, probably" +
-                              " remove the old one and start a new view.");
-                return;
-            }
+            const addr = `${ev.sender}.${ev.device}`;
+            console.info('Peer sent us a call-offer:', addr);
             const view = this.addMemberView(ev.sender, ev.device);
             await view.acceptOffer(ev.data);
         },
 
         onPeerAcceptOffer: function(ev) {
             F.assert(ev.data.callId === this.manager.callId);
+            const addr = `${ev.sender}.${ev.device}`;
+            if (!this.isJoined()) {
+                console.warn("Dropping peer accept offer while not joined:", addr);
+            }
             const view = this.getMemberView(ev.sender, ev.device);
             if (!view) {
-                console.error(`Peer accept offer from non-member: ${ev.sender}.${ev.device}`);
+                console.error("Peer accept offer from non-member:", addr);
                 return;
             }
             view.handlePeerAcceptOffer(ev.data);
@@ -620,15 +685,18 @@
         onPeerICECandidates: async function(ev) {
             F.assert(ev.data.callId === this.manager.callId);
             F.assert(ev.data.peerId);
-            const id = `${ev.sender}.${ev.device}`;
+            const addr = `${ev.sender}.${ev.device}`;
+            if (!this.isJoined()) {
+                console.warn("Dropping peer ICE candidates while not joined:", addr);
+                return;
+            }
             const view = this.getMemberView(ev.sender, ev.device);
             const peer = view && view.peer || view._pendingPeer;
             if (!peer || peer._id !== ev.data.peerId) {
-                debugger;
-                console.error("Dropping ICE candidates for invalid peer connection from:", id);
+                console.error("Dropping ICE candidates for invalid peer connection from:", addr);
                 return;
             }
-            console.debug(`Adding ${ev.data.icecandidates.length} ICE candidate(s) for:`, id);
+            console.debug(`Adding ${ev.data.icecandidates.length} ICE candidate(s) for:`, addr);
             await Promise.all(ev.data.icecandidates.map(x =>
                 peer.addIceCandidate(new RTCIceCandidate(x))));
         },
@@ -636,7 +704,8 @@
         onPeerJoin: async function(ev) {
             const addr = `${ev.sender}.${ev.device}`;
             if (!this.isJoined()) {
-                console.error("Dropping peer-join while not joined:", addr);
+                console.info("Treating peer-join as an incoming call request:", addr);
+                this.addIncoming(addr);
                 return;
             }
             console.info('Peer is joining call:', addr);
@@ -645,16 +714,24 @@
             await view.sendOffer();
         },
 
-        onPeerLeave: function(ev) {
+        onPeerLeave: async function(ev) {
             const addr = `${ev.sender}.${ev.device}`;
+            console.warn('Peer left call:', addr);
+            if (!this.isJoined()) {
+                this.removeIncoming(addr);
+                return;
+            }
             const view = this.getMemberView(ev.sender, ev.device);
             if (!view) {
                 console.warn("Dropping peer-leave from detached peer:", addr);
                 return;
             }
-            console.warn('Peer left call:', addr);
             this.removeMemberView(view);
             F.util.playAudio('/audio/call-leave.mp3');  // bg okay
+            if (this.memberViews.size === 1) {
+                console.warn("Last peer member left: Leaving call..");
+                await this.leave();
+            }
         },
 
         onJoinToggleClick: async function() {
@@ -665,7 +742,9 @@
                     await this.leave();
                     F.util.playAudio('/audio/call-leave.mp3');  // bg okay
                 } else {
-                    F.util.playAudio('/audio/call-dial.mp3');  // bg okay
+                    if (!this._incoming.size) {
+                        F.util.playAudio('/audio/call-dial.mp3');  // bg okay
+                    }
                     await this.join();
                 }
             } finally {
@@ -916,7 +995,7 @@
             this.device = options.device;
             this.addr = `${this.userId}.${this.device}`;
             this.callView = options.callView;
-            this.soundLevel = -1;
+            this.soundRMS = -1;
             this.outgoing = this.userId === F.currentUser.id && this.device === F.currentDevice;
             if (this.outgoing) {
                 this.$el.addClass('outgoing');
@@ -939,9 +1018,11 @@
         },
 
         render: async function() {
+            this.soundIndicatorEl = null;
             this.videoEl = null;
             await F.View.prototype.render.call(this);
             this.videoEl = this.$('video')[0];
+            this.soundIndicatorEl = this.$('.f-soundlevel .f-indicator')[0];
             this.bindStream(this.stream);
             return this;
         },
@@ -1021,6 +1102,14 @@
             return this.peer && isPeerConnectState(this.peer.iceConnectionState);
         },
 
+        throttledVolumeIndicate: _.throttle(function() {
+            if (!this.soundIndicatorEl) {
+                return;
+            }
+            const loudness = Math.min(1, Math.max(0, volumeLoudness(this.soundDBV)));
+            this.soundIndicatorEl.style.width = Math.round(loudness * 100) + '%';
+        }, 1000 / 15),
+
         bindStream: function(stream) {
             F.assert(stream == null || stream instanceof MediaStream);
             this.stream = stream;
@@ -1044,19 +1133,22 @@
                 }
             }
             const hasMedia = hasVideo || (hasAudio && !this.outgoing);
-            this.soundLevel = -1;
+            this.soundRMS = -1;
+            this.soundDBV = -100;
             let soundMeter;
             if (hasAudio) {
-                if (!this.soundMeter || this.soundMeter.src.mediaStream !== stream) {
+                if (!this.soundMeter || this.soundMeter.source.mediaStream !== stream) {
                     if (this.soundMeter) {
                         this.soundMeter.disconnect();
                     }
                     soundMeter = new SoundMeter(stream, levels => {
-                        // The disconnect is not immediate, so we need to check that we are still
-                        // the wired sound meter.
-                        if (this.soundMeter === soundMeter) {
-                            this.soundLevel = levels.average;
+                        if (this.soundMeter !== soundMeter) {
+                            return;
                         }
+                        this.soundRMS = levels.averageRms;
+                        this.soundDBV = levels.averageDBV;
+                        this.trigger('soundlevel', levels);
+                        this.throttledVolumeIndicate.call(this);
                     });
                 } else {
                     soundMeter = this.soundMeter;  // no change
@@ -1087,7 +1179,8 @@
             if (this.soundMeter) {
                 this.soundMeter.disconnect();
                 this.soundMeter = null;
-                this.soundLevel = -1;
+                this.soundRMS = -1;
+                this.soundDBV = -100;
             }
             if (this.stream) {
                 for (const track of this.stream.getTracks()) {
@@ -1150,6 +1243,18 @@
                     // Be sure to call everytime so we are aware of all tracks.
                     // Using MediaStream.onaddtrack does not work as expected.
                     this.bindStream(stream);
+                },
+
+                negotiationneeded: ev => {
+                    console.debug("negotiationneeded:", ev);
+                },
+
+                addstream: ev => {
+                    console.debug("Add stream:", ev);
+                },
+
+                removestream: ev => {
+                    console.debug("Remove stream:", ev);
                 }
             };
             for (const [event, listener] of Object.entries(this._peerListeners)) {
@@ -1210,7 +1315,6 @@
                 console.info("Accepting call offer from:", this.addr);
                 this.sendPeerControl('callAcceptOffer', {peerId: data.peerId, answer});  // bg okay
             });
-            this.callView.setJoined(true);
         },
 
         handlePeerAcceptOffer: async function(data) {
@@ -1259,9 +1363,11 @@
         },
 
         render: async function() {
+            this.soundIndicatorEl = null;
             this.videoEl = null;
             await F.View.prototype.render.call(this);
             this.videoEl = this.$('video')[0];
+            this.soundIndicatorEl = this.$('.f-soundlevel .f-indicator')[0];
             this.$('.ui.dropdown').dropdown({
                 onChange: this.onDropdownChange.bind(this),
             });
@@ -1277,6 +1383,7 @@
                     this.stopListening(this.memberView, 'pinned');
                     this.stopListening(this.memberView, 'silenced');
                     this.stopListening(this.memberView, 'statuschanged');
+                    this.stopListening(this.memberView, 'soundlevel');
                 }
                 this.memberView = view;
                 this.listenTo(view, 'bindstream', this.onMemberBindStream);
@@ -1284,6 +1391,7 @@
                 this.listenTo(view, 'pinned', this.onMemberPinned);
                 this.listenTo(view, 'silenced', this.onMemberSilenced);
                 this.listenTo(view, 'statuschanged', this.onMemberStatusChanged);
+                this.listenTo(view, 'soundlevel', this.onMemberSoundLevel);
             }
             await this.render();
             this.videoEl.srcObject = view.stream;
@@ -1316,6 +1424,14 @@
             await this.videoEl.requestPictureInPicture();
         },
 
+        throttledVolumeIndicate: _.throttle(function() {
+            if (!this.soundIndicatorEl) {
+                return;
+            }
+            const loudness = Math.min(1, Math.max(0, volumeLoudness(this.memberView.soundDBV)));
+            this.soundIndicatorEl.style.width = Math.round(loudness * 100) + '%';
+        }, 1000 / 25),
+
         onDropdownChange: function(value) {
             const handlers = {
                 silence: this.memberView.toggleSilenced.bind(this.memberView),
@@ -1345,6 +1461,10 @@
 
         onMemberStatusChanged: function(view, value) {
             this.$('.f-status').text(value);
+        },
+
+        onMemberSoundLevel: function(levels) {
+            this.throttledVolumeIndicate.call(this);
         }
     });
 
@@ -1490,36 +1610,40 @@
         // Adapted from: https://github.com/webrtc/samples/blob/gh-pages/src/content/getusermedia/volume/js/soundmeter.js
 
         constructor(stream, onLevel) {
-            this.current = 0;  // public
-            this.average = 0;  // public
+            this.rms = 0;
+            this.averageRms = 0;
+            this.dBV = -100;
+            this.averageDBV = -100;
             const ctx = getAudioContext();
             if (!ctx) {
                 return;
             }
             this.script = ctx.createScriptProcessor(2048, 1, 1);
             this.script.addEventListener('audioprocess', event => {
-                const input = event.inputBuffer.getChannelData(0);
                 let sum = 0;
-                for (const x of input) {
+                for (const x of event.inputBuffer.getChannelData(0)) {
                     sum += x * x;
                 }
-                this.current = Math.sqrt(sum / input.length);
-                this.average = 0.95 * this.average + 0.05 * this.current;
+                this.rms = Math.sqrt(sum / event.inputBuffer.length);
+                this.dBV = 20 * Math.log10(this.rms);
+                this.averageRms = 0.90 * this.averageRms + 0.10 * this.rms;
+                this.averageDBV = 20 * Math.log10(this.averageRms);
                 onLevel({
-                    current: this.current,
-                    average: this.average
+                    rms: this.rms,
+                    averageRms: this.averageRms,
+                    dBV: this.dBV,
+                    averageDBV: this.averageDBV
                 });
             });
-            this.src = ctx.createMediaStreamSource(stream);
-            this.src.connect(this.script);
-            // necessary to make sample run, but should not be.
-            this.script.connect(ctx.destination);
+            this.source = ctx.createMediaStreamSource(stream);
+            this.source.connect(this.script);
+            this.script.connect(ctx.destination);  // Required for chromium, must have destination wired.
         }
 
         disconnect() {
-            if (this.src) {
-                this.src.disconnect();
-                this.src = null;
+            if (this.source) {
+                this.source.disconnect();
+                this.source = null;
             }
             if (this.script) {
                 this.script.disconnect();
