@@ -76,6 +76,13 @@ async function renderSimpleTemplate(filename, options, finish) {
 
 
 async function main() {
+    //Trying to force connections to close asap
+    //https://blog.fullstacktraining.com/concurrent-http-connections-in-node-js/
+    const handleRender = function(err, html, req, res) {
+        //console.log(html);
+        res.send(html);
+        res.end();
+    }
     const root = `${__dirname}/../dist`;
     const jsenv = {};
     for (const key of env_clone) {
@@ -142,46 +149,60 @@ async function main() {
         res.setHeader('Connection', 'close');
         const reqenv = Object.assign({CLIENT_IP: req.ip}, jsenv);
         res.send(`self.F=self.F||{};F.env=${JSON.stringify(reqenv)};`);
+        res.end();
     });
     atRouter.get('/@version.json', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
         res.setHeader('Connection', 'close');
         res.json({version: pkgVersion});
+        res.end();
     });
     atRouter.get('/@worker-service.js', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
         res.setHeader('Connection', 'close');
         res.sendFile(`static/js/worker/service${minify_ext}.js`, {root});
+        res.end();
     });
     atRouter.get('/@worker-shared.js', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
         res.setHeader('Connection', 'close');
         res.sendFile(`static/js/worker/shared${minify_ext}.js`, {root});
+        res.end();
     });
     atRouter.get('/@install', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
         res.setHeader('Connection', 'close');
-        res.render('install', {subs});
+        res.render('install', {subs}, function(err, html) {
+            handleRender(err, html, req, res);
+        });
     });
     atRouter.get('/@signin', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
-        res.render('signin', {subs});
+        res.setHeader('Connection', 'close');
+        res.render('signin', {subs}, function(err, html) {
+            handleRender(err, html, req, res);
+        });
     });
     atRouter.get('/@embed', (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
         res.setHeader('Connection', 'close');
-        res.render('embed', {subs});
+        res.render('embed', {subs}, function(err, html) {
+            handleRender(err, html, req, res);
+        });
     });
     atRouter.get('/health', (req, res) => {
         res.setHeader('Connection', 'close');
         res.send('ok');
+        res.end();
     });
     atRouter.get(['/@', '/@/*'], (req, res) => {
         res.setHeader('Cache-Control', cacheDisabled);
         res.setHeader('Connection', 'close');
-        res.render('main', {subs});
+        res.render('main', {subs}, function(err, html) {
+            handleRender(err, html, req, res);
+        });
     });
-    atRouter.all('/@*', (req, res) => res.status(404).send(`File Not Found: "${req.path}"\n`));
+    atRouter.all('/@*', (req, res) => res.status(404).send(`File Not Found: "${req.path}"\n`).end());
     app.use(atRouter);
 
     if (ATLAS_UI_URL) {
@@ -190,9 +211,16 @@ async function main() {
             target: ATLAS_UI_URL,
             changeOrigin: true
         });
+        
+        //proxy.on('proxyReq', function(proxyReq, req, res, options) {
+        //    proxyReq.setHeader('Connection', 'close');
+        //});
+
         app.all(['/*'], function(req, res) {
+            res.setHeader('Connection', 'close');
             console.log('Atlas UI Proxy:', req.path);
-            return proxy.web.apply(proxy, arguments);
+            //return proxy.web.apply(proxy, arguments);
+            proxy.web(req, res);
         });
     }
 

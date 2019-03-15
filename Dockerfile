@@ -1,4 +1,4 @@
-FROM node:10
+FROM node:11
 ENV LC_ALL=C.UTF-8 \
     NODE_ENV=production
 RUN apt-get update && \
