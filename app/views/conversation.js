@@ -129,61 +129,61 @@
             this.$('.f-title-display').show();
         },
 
-        onPaste: function(ev) {
-            const data = ev.originalEvent.clipboardData;
-            /* Only handle file attachments and ONLY if there isn't an html option.
-             * The HTML option may seem wrong (and it might be) but excel on OSX send
-             * cell content as an image in addition to html.  We prefer the html over
-             * the image content in this case. */
-            if (!(data.files && data.files.length) || data.types.indexOf('text/html') !== -1) {
-                return;
-            }
-            ev.preventDefault();
-            this.composeView.fileInput.addFiles(data.files);
-            this.focusMessageField(); // Make <enter> key after paste work always.
-        },
-
-        onDrop: function(ev) {
-            if (!this._dragEventHasFiles(ev)) {
-                return;
-            }
-            ev.preventDefault();
-            const data = ev.originalEvent.dataTransfer;
-            this.composeView.fileInput.addFiles(data.files);
-            if (platform.name !== 'Firefox') {
-                this.$dropZone.dimmer('hide');
-            }
-            this.drag_bucket.clear();
-            this.focusMessageField(); // Make <enter> key after drop work always.
-        },
-
-        onDragOver: function(ev) {
-            if (!this._dragEventHasFiles(ev)) {
-                return;
-            }
-            /* Must prevent default so we can handle drop event ourselves. */
-            ev.preventDefault();
-        },
-
-        onDragEnter: function(ev) {
-            if (!this._dragEventHasFiles(ev) || platform.name === 'Firefox') {
-                return;
-            }
-            this.drag_bucket.add(ev.target);
-            if (this.drag_bucket.size === 1) {
-                this.$dropZone.dimmer('show');
-            }
-        },
-
-        onDragLeave: function(ev) {
-            if (!this._dragEventHasFiles(ev) || platform.name === 'Firefox') {
-                return;
-            }
-            this.drag_bucket.delete(ev.target);
-            if (this.drag_bucket.size === 0) {
-                this.$dropZone.dimmer('hide');
-            }
-        },
+//        onPaste: function(ev) {
+//            const data = ev.originalEvent.clipboardData;
+//            /* Only handle file attachments and ONLY if there isn't an html option.
+//             * The HTML option may seem wrong (and it might be) but excel on OSX send
+//             * cell content as an image in addition to html.  We prefer the html over
+//             * the image content in this case. */
+//            if (!(data.files && data.files.length) || data.types.indexOf('text/html') !== -1) {
+//                return;
+//            }
+//            ev.preventDefault();
+//            this.composeView.fileInput.addFiles(data.files);
+//            this.focusMessageField(); // Make <enter> key after paste work always.
+//        },
+//
+//        onDrop: function(ev) {
+//            if (!this._dragEventHasFiles(ev)) {
+//                return;
+//            }
+//            ev.preventDefault();
+//            const data = ev.originalEvent.dataTransfer;
+//            this.composeView.fileInput.addFiles(data.files);
+//            if (platform.name !== 'Firefox') {
+//                this.$dropZone.dimmer('hide');
+//            }
+//            this.drag_bucket.clear();
+//            this.focusMessageField(); // Make <enter> key after drop work always.
+//        },
+//
+//        onDragOver: function(ev) {
+//            if (!this._dragEventHasFiles(ev)) {
+//                return;
+//            }
+//            /* Must prevent default so we can handle drop event ourselves. */
+//            ev.preventDefault();
+//        },
+//
+//        onDragEnter: function(ev) {
+//            if (!this._dragEventHasFiles(ev) || platform.name === 'Firefox') {
+//                return;
+//            }
+//            this.drag_bucket.add(ev.target);
+//            if (this.drag_bucket.size === 1) {
+//                this.$dropZone.dimmer('show');
+//            }
+//        },
+//
+//        onDragLeave: function(ev) {
+//            if (!this._dragEventHasFiles(ev) || platform.name === 'Firefox') {
+//                return;
+//            }
+//            this.drag_bucket.delete(ev.target);
+//            if (this.drag_bucket.size === 0) {
+//                this.$dropZone.dimmer('hide');
+//            }
+//        },
 
         onOpened: async function() {
             this.messagesView.scrollRestore();
